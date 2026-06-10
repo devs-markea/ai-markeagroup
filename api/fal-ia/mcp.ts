@@ -40,10 +40,14 @@ async function falQueueSubmit(endpointId: string, input: unknown): Promise<unkno
 }
 
 /** Check job status or fetch result. */
-/** Status/result check — Fal.ai queue uses POST, not GET. */
-async function falQueueCheck(endpointId: string, requestId: string, path: "status" | "result" = "status"): Promise<unknown> {
-  const suffix = path === "status" ? "/status" : "";
-  const url = `${FAL_QUEUE}/${endpointId}/requests/${requestId}${suffix}`;
+/**
+ * Check job status or fetch result by request_id alone — no endpoint_id in the path.
+ * POST https://queue.fal.run/requests/{id}/status  → status
+ * POST https://queue.fal.run/requests/{id}         → full result
+ */
+async function falQueueCheck(requestId: string, fetchResult = false): Promise<unknown> {
+  const suffix = fetchResult ? "" : "/status";
+  const url = `${FAL_QUEUE}/requests/${requestId}${suffix}`;
   const res = await fetch(url, {
     method: "POST",
     headers: falHeaders(),
@@ -349,14 +353,12 @@ function createMcpServer(): McpServer {
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
       inputSchema: {
         request_id: z.string().describe("The request_id returned by submit_job"),
-        endpoint_id: z.string().describe("The same endpoint_id used in submit_job"),
         fetch_result: z.boolean().optional().describe("Set true to retrieve the final output (only when COMPLETED). Default: false"),
       },
     },
-    async ({ request_id, endpoint_id, fetch_result }) => {
+    async ({ request_id, fetch_result }) => {
       try {
-        const path = fetch_result ? "result" : "status";
-        const data = await falQueueCheck(endpoint_id, request_id, path);
+        const data = await falQueueCheck(request_id, fetch_result ?? false);
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch (err) {
         return toolError(err);
