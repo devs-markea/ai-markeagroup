@@ -608,17 +608,24 @@ export default async function handler(
     return;
   }
 
-  // Bearer token auth
-  const rawAuth = Array.isArray(req.headers.authorization)
-    ? req.headers.authorization[0]
-    : (req.headers.authorization ?? "");
-  const token = rawAuth.startsWith("Bearer ") ? rawAuth.slice(7) : "";
+  // Auth: Bearer token from header OR ?token= query param.
+  // If MCP_BEARER_TOKEN is not set, the endpoint is open (useful for claude.ai OAuth-less connectors).
   const expected = process.env.MCP_BEARER_TOKEN ?? "";
+  if (expected) {
+    const rawAuth = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : (req.headers.authorization ?? "");
+    const headerToken = rawAuth.startsWith("Bearer ") ? rawAuth.slice(7) : "";
 
-  if (!expected || token !== expected) {
-    res.writeHead(401, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Unauthorized" }));
-    return;
+    // Also accept token as query param for clients that can't set custom headers
+    const urlToken = new URL(req.url ?? "/", "https://x").searchParams.get("token") ?? "";
+
+    const token = headerToken || urlToken;
+    if (token !== expected) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Unauthorized" }));
+      return;
+    }
   }
 
   const transport = new StreamableHTTPServerTransport({
