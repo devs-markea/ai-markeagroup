@@ -319,18 +319,28 @@ function createMcpServer(): McpServer {
       try {
         const result = (await falQueueSubmit(endpoint_id, input)) as {
           request_id: string;
-          status_url?: string;
-          response_url?: string;
         };
-        const lines = [
-          `Job submitted successfully.\n`,
-          `request_id: \`${result.request_id}\`\n`,
-          `endpoint_id: \`${endpoint_id}\`\n`,
-        ];
-        if (result.status_url)   lines.push(`status_url: ${result.status_url}\n`);
-        if (result.response_url) lines.push(`response_url: ${result.response_url}\n`);
-        lines.push(`\nUse \`check_job\` with status_url to poll, or response_url to fetch results.`);
-        return { content: [{ type: "text", text: lines.join("") }] };
+
+        // Construct URLs ourselves using the full endpoint_id.
+        // Fal.ai's status_url/response_url in the response can be truncated
+        // (missing sub-path variants like /o3/pro/reference-to-video/), so
+        // we always build them from the endpoint_id we submitted with.
+        const base = `${FAL_QUEUE}/${endpoint_id}/requests/${result.request_id}`;
+        const status_url   = `${base}/status`;
+        const response_url = base;
+
+        const text = [
+          `Job submitted successfully.`,
+          `request_id:   ${result.request_id}`,
+          `endpoint_id:  ${endpoint_id}`,
+          `status_url:   ${status_url}`,
+          `response_url: ${response_url}`,
+          ``,
+          `Pass status_url to check_job to poll progress.`,
+          `Pass response_url to check_job (with fetch_result=true) to retrieve the final result.`,
+        ].join("\n");
+
+        return { content: [{ type: "text", text }] };
       } catch (err) {
         return toolError(err);
       }
