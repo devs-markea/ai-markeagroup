@@ -40,11 +40,16 @@ async function falQueueSubmit(endpointId: string, input: unknown): Promise<unkno
 }
 
 /** Check job status or fetch result. */
-async function falQueueGet(url: string): Promise<unknown> {
-  const headers = falHeaders();
-  delete headers["Content-Type"];
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`Fal.ai queue GET ${res.status}: ${await res.text()}`);
+/** Status/result check — Fal.ai queue uses POST, not GET. */
+async function falQueueCheck(endpointId: string, requestId: string, path: "status" | "result" = "status"): Promise<unknown> {
+  const suffix = path === "status" ? "/status" : "";
+  const url = `${FAL_QUEUE}/${endpointId}/requests/${requestId}${suffix}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: falHeaders(),
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(`Fal.ai queue ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
@@ -317,8 +322,15 @@ function createMcpServer(): McpServer {
     },
     async ({ endpoint_id, input }) => {
       try {
-        const content = await proxyToFalMcp("submit_job", { endpoint_id, input });
-        return { content };
+        const result = (await falQueueSubmit(endpoint_id, input)) as { request_id: string };
+        const text = [
+          `Job submitted successfully.`,
+          `request_id:  ${result.request_id}`,
+          `endpoint_id: ${endpoint_id}`,
+          ``,
+          `Use check_job with these values to poll status or fetch the result.`,
+        ].join("\n");
+        return { content: [{ type: "text", text }] };
       } catch (err) {
         return toolError(err);
       }
@@ -332,22 +344,20 @@ function createMcpServer(): McpServer {
     {
       title: "Check Job",
       description:
-        "Poll the status or fetch the final result of an async Fal.ai job submitted with submit_job.",
+        "Poll the status or fetch the final result of an async Fal.ai job. " +
+        "Use fetch_result=false (default) to check progress, true once status is COMPLETED.",
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
       inputSchema: {
         request_id: z.string().describe("The request_id returned by submit_job"),
         endpoint_id: z.string().describe("The same endpoint_id used in submit_job"),
-        logs: z.boolean().optional().describe("Include execution logs (default: false)"),
+        fetch_result: z.boolean().optional().describe("Set true to retrieve the final output (only when COMPLETED). Default: false"),
       },
     },
-    async ({ request_id, endpoint_id, logs }) => {
+    async ({ request_id, endpoint_id, fetch_result }) => {
       try {
-        const content = await proxyToFalMcp("check_job", {
-          request_id,
-          endpoint_id,
-          logs: logs ?? false,
-        });
-        return { content };
+        const path = fetch_result ? "result" : "status";
+        const data = await falQueueCheck(endpoint_id, request_id, path);
+        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch (err) {
         return toolError(err);
       }
