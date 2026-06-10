@@ -317,30 +317,8 @@ function createMcpServer(): McpServer {
     },
     async ({ endpoint_id, input }) => {
       try {
-        const result = (await falQueueSubmit(endpoint_id, input)) as {
-          request_id: string;
-        };
-
-        // Construct URLs ourselves using the full endpoint_id.
-        // Fal.ai's status_url/response_url in the response can be truncated
-        // (missing sub-path variants like /o3/pro/reference-to-video/), so
-        // we always build them from the endpoint_id we submitted with.
-        const base = `${FAL_QUEUE}/${endpoint_id}/requests/${result.request_id}`;
-        const status_url   = `${base}/status`;
-        const response_url = base;
-
-        const text = [
-          `Job submitted successfully.`,
-          `request_id:   ${result.request_id}`,
-          `endpoint_id:  ${endpoint_id}`,
-          `status_url:   ${status_url}`,
-          `response_url: ${response_url}`,
-          ``,
-          `Pass status_url to check_job to poll progress.`,
-          `Pass response_url to check_job (with fetch_result=true) to retrieve the final result.`,
-        ].join("\n");
-
-        return { content: [{ type: "text", text }] };
+        const content = await proxyToFalMcp("submit_job", { endpoint_id, input });
+        return { content };
       } catch (err) {
         return toolError(err);
       }
@@ -354,25 +332,22 @@ function createMcpServer(): McpServer {
     {
       title: "Check Job",
       description:
-        "Poll the status or fetch the result of an async Fal.ai job. " +
-        "ALWAYS use the exact status_url and response_url returned by submit_job — do NOT reconstruct them. " +
-        "Use status_url to check progress (IN_QUEUE / IN_PROGRESS / COMPLETED). " +
-        "Use response_url only once status is COMPLETED to retrieve the final output.",
+        "Poll the status or fetch the final result of an async Fal.ai job submitted with submit_job.",
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
       inputSchema: {
-        url: z
-          .string()
-          .url()
-          .describe(
-            "The URL to call. Use status_url from submit_job to check progress, " +
-            "or response_url from submit_job to fetch the final result when COMPLETED."
-          ),
+        request_id: z.string().describe("The request_id returned by submit_job"),
+        endpoint_id: z.string().describe("The same endpoint_id used in submit_job"),
+        logs: z.boolean().optional().describe("Include execution logs (default: false)"),
       },
     },
-    async ({ url }) => {
+    async ({ request_id, endpoint_id, logs }) => {
       try {
-        const data = await falQueueGet(url);
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        const content = await proxyToFalMcp("check_job", {
+          request_id,
+          endpoint_id,
+          logs: logs ?? false,
+        });
+        return { content };
       } catch (err) {
         return toolError(err);
       }
