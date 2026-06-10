@@ -1,0 +1,24 @@
+{
+  "name": "fal-ai-mcp-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Authenticated MCP proxy for Fal.ai — deployable on Vercel",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vercel/node": "^5.0.0",
+    "typescript": "^5.7.0",
+    "vercel": "^41.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
