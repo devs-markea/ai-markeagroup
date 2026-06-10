@@ -40,12 +40,10 @@ async function falQueueSubmit(endpointId: string, input: unknown): Promise<unkno
 }
 
 /** Check job status or fetch result. */
-async function falQueueGet(endpointId: string, requestId: string, path: "status" | "result" = "status"): Promise<unknown> {
+async function falQueueGet(url: string): Promise<unknown> {
   const headers = falHeaders();
   delete headers["Content-Type"];
-  const res = await fetch(`${FAL_QUEUE}/${endpointId}/requests/${requestId}/${path}`, {
-    headers,
-  });
+  const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`Fal.ai queue GET ${res.status}: ${await res.text()}`);
   return res.json();
 }
@@ -325,10 +323,13 @@ function createMcpServer(): McpServer {
           response_url?: string;
         };
         const lines = [
-          `Job submitted. request_id: \`${result.request_id}\``,
-          `\nPoll status with \`check_job\`:\n  endpoint_id: "${endpoint_id}"\n  request_id: "${result.request_id}"`,
+          `Job submitted successfully.\n`,
+          `request_id: \`${result.request_id}\`\n`,
+          `endpoint_id: \`${endpoint_id}\`\n`,
         ];
-        if (result.status_url) lines.push(`\nStatus URL: ${result.status_url}`);
+        if (result.status_url)   lines.push(`status_url: ${result.status_url}\n`);
+        if (result.response_url) lines.push(`response_url: ${result.response_url}\n`);
+        lines.push(`\nUse \`check_job\` with status_url to poll, or response_url to fetch results.`);
         return { content: [{ type: "text", text: lines.join("") }] };
       } catch (err) {
         return toolError(err);
@@ -343,22 +344,50 @@ function createMcpServer(): McpServer {
     {
       title: "Check Job",
       description:
-        "Check the status of an async Fal.ai job, or retrieve its final result. " +
-        "Set fetch_result=true only when the job status is COMPLETED.",
+        "Check the status of an async Fal.ai job, or fetch its final result. " +
+        "Prefer passing status_url or response_url directly from submit_job output — " +
+        "this avoids URL construction errors with complex endpoint paths.",
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
       inputSchema: {
-        endpoint_id: z.string().describe("The same endpoint_id used in submit_job"),
-        request_id: z.string().describe("The request_id returned by submit_job"),
+        status_url: z
+          .string()
+          .optional()
+          .describe("The status_url returned by submit_job (recommended — use this to check progress)"),
+        response_url: z
+          .string()
+          .optional()
+          .describe("The response_url returned by submit_job (use this to fetch the final result)"),
+        endpoint_id: z
+          .string()
+          .optional()
+          .describe("Fallback: the endpoint_id used in submit_job (only if status_url/response_url are unavailable)"),
+        request_id: z
+          .string()
+          .optional()
+          .describe("Fallback: the request_id returned by submit_job (only if status_url/response_url are unavailable)"),
         fetch_result: z
           .boolean()
           .optional()
-          .describe("If true, fetch the full result instead of just the status (default: false)"),
+          .describe("If true and using endpoint_id+request_id fallback, fetch result instead of status"),
       },
     },
-    async ({ endpoint_id, request_id, fetch_result }) => {
+    async ({ status_url, response_url, endpoint_id, request_id, fetch_result }) => {
       try {
-        const path = fetch_result ? "result" : "status";
-        const data = await falQueueGet(endpoint_id, request_id, path);
+        // Prefer direct URLs returned by submit_job — they contain the full endpoint path
+        let url: string;
+        if (fetch_result && response_url) {
+          url = response_url;
+        } else if (!fetch_result && status_url) {
+          url = status_url;
+        } else if (endpoint_id && request_id) {
+          // Fallback: construct URL manually (may fail for multi-segment endpoint paths)
+          const path = fetch_result ? "" : "/status";
+          url = `${FAL_QUEUE}/${endpoint_id}/requests/${request_id}${path}`;
+        } else {
+          return toolError("Provide status_url (or response_url if fetching result), or both endpoint_id and request_id.");
+        }
+
+        const data = await falQueueGet(url);
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch (err) {
         return toolError(err);
