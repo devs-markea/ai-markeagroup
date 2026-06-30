@@ -370,15 +370,67 @@ function createMcpServer(): McpServer {
     }
   );
 
+  // ── initiate_upload ───────────────────────────────────────────────────────
+  // Returns a presigned PUT URL so the client can upload directly to Fal.ai CDN
+  // without routing binary data through this proxy. Preferred for files > 1 MB.
+
+  server.registerTool(
+    "initiate_upload",
+    {
+      title: "Initiate Upload",
+      description:
+        "Get a presigned upload URL for Fal.ai CDN. Returns upload_url (PUT your bytes there) " +
+        "and file_url (the resulting CDN URL to use in model inputs). " +
+        "Preferred over upload_file for images/videos > 1 MB — no binary data goes through the proxy.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: {
+        content_type: z.string().describe("MIME type, e.g. 'image/jpeg', 'image/png', 'video/mp4'"),
+        file_size: z.number().int().positive().describe("File size in bytes"),
+      },
+    },
+    async ({ content_type, file_size }) => {
+      try {
+        const initRes = await fetch(`${FAL_REST}/storage/upload/initiate`, {
+          method: "POST",
+          headers: falHeaders(),
+          body: JSON.stringify({ content_type, file_size }),
+        });
+        if (!initRes.ok) {
+          throw new Error(`Storage initiate ${initRes.status}: ${await initRes.text()}`);
+        }
+        const { upload_url, file_url } = (await initRes.json()) as {
+          upload_url: string;
+          file_url: string;
+        };
+        const text = [
+          `Upload initiated.`,
+          `upload_url: ${upload_url}`,
+          `file_url:   ${file_url}`,
+          ``,
+          `PUT your file bytes to upload_url with Content-Type: ${content_type}`,
+          `Then use file_url as the input URL for run_model or submit_job.`,
+          ``,
+          `Alternatively, POST the file as multipart/form-data to /fal-ia/upload`,
+          `(field name "file") to have the proxy handle the upload automatically.`,
+        ].join("\n");
+        return { content: [{ type: "text", text }] };
+      } catch (err) {
+        return toolError(err);
+      }
+    }
+  );
+
   // ── upload_file ───────────────────────────────────────────────────────────
+  // For small files only (< ~3 MB). Larger files should use initiate_upload
+  // or POST directly to /fal-ia/upload to avoid Vercel's 4.5 MB body limit.
 
   server.registerTool(
     "upload_file",
     {
-      title: "Upload File",
+      title: "Upload File (small files)",
       description:
-        "Upload a file to Fal.ai's CDN and get back a URL you can pass to model inputs. " +
-        "Provide the file content as a base64-encoded string. Max recommended size: 10 MB.",
+        "Upload a small file (< 3 MB) to Fal.ai CDN via base64. " +
+        "For larger files use initiate_upload instead to avoid proxy size limits.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: {
         base64_data: z

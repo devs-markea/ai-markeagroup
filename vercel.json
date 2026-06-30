@@ -3,11 +3,18 @@
     {
       "source": "/fal-ia/mcp",
       "destination": "/api/fal-ia/mcp"
+    },
+    {
+      "source": "/fal-ia/upload",
+      "destination": "/api/fal-ia/upload"
     }
   ],
   "functions": {
     "api/fal-ia/mcp.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
+    },
+    "api/fal-ia/upload.ts": {
+      "maxDuration": 300
     }
   },
   "headers": [
