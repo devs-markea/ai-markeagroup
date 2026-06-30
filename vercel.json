@@ -10,10 +10,7 @@
     }
   ],
   "functions": {
-    "api/fal-ia/mcp.ts": {
-      "maxDuration": 300
-    },
-    "api/fal-ia/upload.ts": {
+    "api/fal-ia/*.ts": {
       "maxDuration": 300
     }
   },
