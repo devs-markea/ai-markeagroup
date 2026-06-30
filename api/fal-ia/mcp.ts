@@ -39,19 +39,15 @@ async function falQueueSubmit(endpointId: string, input: unknown): Promise<unkno
   return res.json();
 }
 
-/** Check job status or fetch result. */
 /**
- * Check job status or fetch result by request_id alone — no endpoint_id in the path.
- * POST https://queue.fal.run/requests/{id}/status  → status
- * POST https://queue.fal.run/requests/{id}         → full result
+ * Check job status or fetch result using the pre-built URLs returned by submit.
+ * Fal.ai provides status_url and response_url in the submit response — use them
+ * directly with GET instead of reconstructing the path (which requires endpoint_id).
  */
-async function falQueueCheck(requestId: string, fetchResult = false): Promise<unknown> {
-  const suffix = fetchResult ? "" : "/status";
-  const url = `${FAL_QUEUE}/requests/${requestId}${suffix}`;
+async function falQueueCheck(url: string): Promise<unknown> {
   const res = await fetch(url, {
-    method: "POST",
+    method: "GET",
     headers: falHeaders(),
-    body: JSON.stringify({}),
   });
   if (!res.ok) throw new Error(`Fal.ai queue ${res.status}: ${await res.text()}`);
   return res.json();
@@ -326,13 +322,19 @@ function createMcpServer(): McpServer {
     },
     async ({ endpoint_id, input }) => {
       try {
-        const result = (await falQueueSubmit(endpoint_id, input)) as { request_id: string };
+        const result = (await falQueueSubmit(endpoint_id, input)) as {
+          request_id: string;
+          status_url?: string;
+          response_url?: string;
+        };
         const text = [
           `Job submitted successfully.`,
-          `request_id:  ${result.request_id}`,
-          `endpoint_id: ${endpoint_id}`,
+          `request_id:   ${result.request_id}`,
+          `endpoint_id:  ${endpoint_id}`,
+          ...(result.status_url   ? [`status_url:   ${result.status_url}`]   : []),
+          ...(result.response_url ? [`response_url: ${result.response_url}`] : []),
           ``,
-          `Use check_job with these values to poll status or fetch the result.`,
+          `Use check_job with status_url to poll, or response_url once COMPLETED.`,
         ].join("\n");
         return { content: [{ type: "text", text }] };
       } catch (err) {
@@ -349,16 +351,18 @@ function createMcpServer(): McpServer {
       title: "Check Job",
       description:
         "Poll the status or fetch the final result of an async Fal.ai job. " +
-        "Use fetch_result=false (default) to check progress, true once status is COMPLETED.",
+        "Pass status_url to check progress, or response_url to retrieve the final output once COMPLETED. " +
+        "Both URLs are returned by submit_job.",
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
       inputSchema: {
-        request_id: z.string().describe("The request_id returned by submit_job"),
-        fetch_result: z.boolean().optional().describe("Set true to retrieve the final output (only when COMPLETED). Default: false"),
+        url: z.string().url().describe(
+          "The status_url (to poll progress) or response_url (to get the result) returned by submit_job"
+        ),
       },
     },
-    async ({ request_id, fetch_result }) => {
+    async ({ url }) => {
       try {
-        const data = await falQueueCheck(request_id, fetch_result ?? false);
+        const data = await falQueueCheck(url);
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch (err) {
         return toolError(err);
