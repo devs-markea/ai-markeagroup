@@ -1,22 +1,17 @@
 {
   "rewrites": [
-    {
-      "source": "/fal-ia/mcp",
-      "destination": "/api/fal-ia/mcp"
-    },
-    {
-      "source": "/fal-ia/upload",
-      "destination": "/api/fal-ia/upload"
-    }
+    { "source": "/health", "destination": "/api/health" },
+    { "source": "/:service/mcp", "destination": "/api/:service/mcp" },
+    { "source": "/:service/upload", "destination": "/api/:service/upload" }
   ],
   "functions": {
-    "api/fal-ia/*.ts": {
+    "api/**/*.ts": {
       "maxDuration": 300
     }
   },
   "headers": [
     {
-      "source": "/fal-ia/mcp",
+      "source": "/:service/mcp",
       "headers": [
         {
           "key": "Cache-Control",

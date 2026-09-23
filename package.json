@@ -1,8 +1,8 @@
 {
-  "name": "fal-ai-mcp-proxy",
+  "name": "markea-mcp",
   "version": "1.0.0",
   "private": true,
-  "description": "Authenticated MCP proxy for Fal.ai — deployable on Vercel",
+  "description": "Markea MCP hub — authenticated MCP servers on Vercel",
   "scripts": {
     "dev": "vercel dev",
     "deploy": "vercel deploy --prod",
