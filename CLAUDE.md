@@ -11,6 +11,7 @@ Servidores actuales (fuente de verdad: `servers/registry.ts`):
 | id    | Endpoint           | Qué hace |
 |-------|--------------------|----------|
 | `fal` | `/fal-ia/mcp` (+ `/fal-ia/upload`) | Fal.ai: imagen, video, audio, jobs async, uploads a CDN, schemas y pricing |
+| `cm`  | `/cm/mcp`          | Community Manager: comentarios de Facebook Pages e Instagram (listar, responder, respuesta privada, ocultar) |
 
 `GET /health` lista los servidores del registro (público, sin secretos).
 
@@ -29,6 +30,7 @@ api/                       # SOLO entrypoints de Vercel (una función por archiv
   health.ts                # GET /health → lista del registro
   fal-ia/mcp.ts            # createMcpHandler(createFalServer, SERVERS.fal)
   fal-ia/upload.ts         # POST multipart/binario → CDN de Fal
+  cm/mcp.ts                # createMcpHandler(createCmServer, SERVERS.cm)
 lib/                       # Infra compartida por todos los MCP
   mcp-handler.ts           # createMcpHandler(): CORS + OPTIONS + auth + transport stateless
   auth.ts                  # isAuthorized(req, meta): token de header y token de URL separados, fail closed
@@ -139,6 +141,29 @@ Helpers en `servers/fal/client.ts`:
 
 `POST /fal-ia/upload`: `multipart/form-data` (campo `file`) o binario crudo con su `Content-Type`. Misma auth que `/fal-ia/mcp`. Responde `{ file_url }`.
 
+## MCP `cm` — detalles
+
+**Enfoque:** solo comentarios de posts (Facebook Pages + Instagram). Mensajes directos (Messenger/Instagram Direct) quedan para otra fase — hoy los sigue manejando Wati; no construir tools de DM aquí sin antes resolver el solapamiento (ver Gotchas).
+
+Cliente en `servers/cm/meta.ts`:
+- Auth: **System User token** (`META_SYSTEM_USER_TOKEN`) de un Business portfolio, con las Páginas/Instagram asignadas. Las tools obtienen el **Page access token** por Página vía `pageContext()`; nunca se usa el token de System User para leer/escribir contenido de una Página, solo para descubrir cuáles están asignadas y para resolver cada Página.
+- Cada request lleva `appsecret_proof` (HMAC del token con `META_APP_SECRET`), así un token filtrado no sirve sin el secret.
+- `assertGraphId` valida que cualquier ID que llegue de una tool sea puramente numérico (`\d+(_\d+)*`) antes de interpolarlo en la URL — evita que un input controlado por el usuario (o un prompt injection) navegue a otro edge de la Graph API (`me/accounts`, `?fields=access_token`, etc.).
+- Los errores de Meta nunca incluyen la URL en el mensaje (llevaría el token); solo `code`/`error_subcode`/`message`.
+
+| Tool | Hace | Notas |
+|------|------|-------|
+| `cm_list_accounts` | Páginas asignadas al System User + su Instagram vinculado | Los `page_id` que devuelve son los que usan las demás tools |
+| `cm_list_posts` | Posts recientes de una Página o de su Instagram, con conteo de comentarios | `platform: facebook \| instagram` |
+| `cm_list_comments` | Comentarios de un post, marcando cuáles no tienen respuesta de la cuenta | `only_unanswered` filtra; compara `from.id`/`username` contra la Página/IG |
+| `cm_reply_comment` | Responde públicamente un comentario | Valida longitud (IG: 300, FB: 8000 caracteres) antes de llamar a Meta |
+| `cm_private_reply` | Responde un comentario por mensaje privado (Messenger/IG Direct) | Solo **una** por comentario; ventana limitada (IG: 7 días); la respuesta del usuario llega al inbox normal (Wati) |
+| `cm_hide_comment` | Oculta/muestra un comentario | Reversible (`hidden: false` para deshacer) |
+
+El **texto de los comentarios es contenido público, no confiable** — las descripciones de las tools lo advierten explícitamente para que el modelo no ejecute instrucciones que aparezcan ahí (prompt injection vía comentarios).
+
+Permisos de Meta usados: `pages_show_list`, `business_management`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_engagement`, `pages_messaging` (para `cm_private_reply`), `instagram_basic`, `instagram_manage_comments`.
+
 ## Gotchas y contexto histórico
 
 - **`check_job` / queue de Fal** tuvo mucha iteración (ver `git log`): reconstruir URLs con `endpoint_id`, POST vs GET, proxy vía MCP de Fal. Estado actual: usar **directamente** las URLs del submit con **GET**. Fal puede devolver paths truncados (p. ej. `fal-ai/kling-video`), no reconstruir sin verificar. Probar contra Fal real antes de tocarlo.
@@ -148,6 +173,9 @@ Helpers en `servers/fal/client.ts`:
 - **Rewrites genéricos**: `/:service/mcp` y `/:service/upload` apuntan a `/api/:service/...`; si la función no existe, Vercel responde 404.
 - `servers/fal/catalog.ts` está hardcodeado y puede quedar desactualizado; para info real usar `get_model_schema` / `search_docs`.
 - `rest.alpha.fal.ai` es un endpoint "alpha" de Fal; si fallan los uploads, revisar primero ahí.
+- **Solapamiento `cm` / Wati:** Wati ya administra conversaciones de Messenger/Instagram en algunas cuentas. Por eso la v1 de `cm` no toca DMs (solo `cm_private_reply`, que es un mensaje único disparado por un comentario, no una conversación). Antes de agregar tools de conversación a `cm`, decidir explícitamente qué sistema es dueño de qué cuentas — Meta solo permite un "receptor primario" por Página (Handover Protocol).
+- **Instagram no permite programar publicaciones por API** — eso sigue en Metricool. `cm` no publica contenido, solo modera/responde comentarios.
+- **App de Meta:** ver memoria `project-meta-cm-app` para los casos de uso ya habilitados en el panel de Meta (Pages, Messenger, Catálogos, Ads MCP, Lead Ads, Marketing API) — la Fase 1 de `cm` solo pide los permisos de comentarios; el resto son fases futuras.
 
 ## Estado del repo
 

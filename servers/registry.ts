@@ -34,4 +34,13 @@ export const SERVERS = {
     tokenEnv: "MCP_TOKEN_FAL",
     urlTokenEnv: "MCP_URL_TOKEN_FAL",
   },
+  cm: {
+    id: "cm",
+    name: "markea-cm",
+    version: "1.0.0",
+    description: "Community Manager — Facebook Pages & Instagram comments: list unanswered, reply, private reply, hide",
+    path: "/cm/mcp",
+    tokenEnv: "MCP_TOKEN_CM",
+    urlTokenEnv: "MCP_URL_TOKEN_CM",
+  },
 } as const satisfies Record<string, ServerMeta>;
