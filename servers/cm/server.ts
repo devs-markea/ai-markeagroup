@@ -11,7 +11,6 @@ import {
   pageContext,
   requireInstagram,
 } from "./meta";
-import { debugEnvReport } from "./debug";
 
 const META = SERVERS.cm;
 
@@ -373,21 +372,6 @@ export function createCmServer(): McpServer {
         return toolError(err);
       }
     }
-  );
-
-  // ── cm_debug_env (TEMPORARY) ──────────────────────────────────────────────
-  // Remove once the appsecret_proof mismatch is diagnosed. Never returns
-  // secret values, only length/format metadata.
-
-  server.registerTool(
-    "cm_debug_env",
-    {
-      title: "Debug Env (temporary)",
-      description: "TEMPORARY: reports metadata about Meta env vars (length/format only, no secret values) to diagnose appsecret_proof errors.",
-      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-      inputSchema: {},
-    },
-    async () => textResult(debugEnvReport())
   );
 
   return server;
