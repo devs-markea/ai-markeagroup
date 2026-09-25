@@ -22,7 +22,8 @@ const MAX_PRIVATE_REPLY = { facebook: 2000, instagram: 1000 } as const;
 const platform = z.enum(["facebook", "instagram"]).describe("'facebook' (the Page) or 'instagram' (the Page's linked Instagram account)");
 const pageId = z.string().regex(GRAPH_ID, "numeric Page ID").describe("Facebook Page ID from cm_list_accounts (also used for its Instagram account)");
 const graphId = (what: string) => z.string().regex(GRAPH_ID, `numeric ${what}`);
-const after = z.string().max(500).optional().describe("Pagination cursor from a previous call's 'next' value");
+// Facebook's opaque cursors can run past 1000 characters.
+const after = z.string().max(2000).optional().describe("Pagination cursor from a previous call's 'next' value");
 
 function snippet(text: string | undefined, max = 140): string {
   if (!text) return "(no text)";
