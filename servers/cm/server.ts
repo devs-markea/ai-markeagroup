@@ -10,6 +10,9 @@ import {
   listPages,
   pageContext,
   requireInstagram,
+  resolveAdToPostId,
+  resolveUrlToId,
+  verifyPageOwnsPost,
 } from "./meta";
 
 const META = SERVERS.cm;
@@ -93,36 +96,45 @@ export function createCmServer(): McpServer {
         page_id: pageId,
         limit: z.number().int().min(1).max(50).optional().describe("Max posts (default: 10)"),
         after,
+        include_ads: z
+          .boolean()
+          .optional()
+          .describe(
+            "Facebook only: also include unpublished/ad-only ('dark') posts, via the promotable_posts edge. " +
+              "Use this to find a post that only exists as an ad and has no organic feed entry (default: false)"
+          ),
       },
     },
-    async ({ platform, page_id, limit, after }) => {
+    async ({ platform, page_id, limit, after, include_ads }) => {
       try {
         const ctx = await pageContext(page_id);
         const n = limit ?? 10;
 
         if (platform === "facebook") {
+          const edge = include_ads ? "promotable_posts" : "posts";
           const res = await graphGet<{
             data: Array<{
               id: string;
               message?: string;
               created_time: string;
               permalink_url?: string;
+              is_published?: boolean;
               comments?: { summary?: { total_count?: number } };
             }>;
             paging?: Paging;
-          }>(`${ctx.pageId}/posts`, ctx.pageToken, {
-            fields: "id,message,created_time,permalink_url,comments.summary(true).limit(0)",
+          }>(`${ctx.pageId}/${edge}`, ctx.pageToken, {
+            fields: "id,message,created_time,permalink_url,is_published,comments.summary(true).limit(0)",
             limit: n,
             after,
           });
           const lines = res.data.map(
             (p) =>
-              `• post_id: ${p.id} — ${p.created_time}\n` +
+              `• post_id: ${p.id} — ${p.created_time}${p.is_published === false ? " · UNPUBLISHED (ad-only)" : ""}\n` +
               `  ${snippet(p.message)}\n` +
               `  comments: ${p.comments?.summary?.total_count ?? 0}${p.permalink_url ? ` · ${p.permalink_url}` : ""}`
           );
           return textResult(
-            `${ctx.pageName} (Facebook) — ${res.data.length} post(s):\n\n${lines.join("\n\n") || "(none)"}${nextCursor(res.paging)}`
+            `${ctx.pageName} (Facebook) — ${res.data.length} post(s)${include_ads ? " (including ad-only)" : ""}:\n\n${lines.join("\n\n") || "(none)"}${nextCursor(res.paging)}`
           );
         }
 
@@ -151,6 +163,49 @@ export function createCmServer(): McpServer {
         return textResult(
           `@${ig.username ?? ig.id} (Instagram) — ${res.data.length} post(s):\n\n${lines.join("\n\n") || "(none)"}${nextCursor(res.paging)}`
         );
+      } catch (err) {
+        return toolError(err);
+      }
+    }
+  );
+
+  // ── cm_resolve_link ───────────────────────────────────────────────────────
+
+  server.registerTool(
+    "cm_resolve_link",
+    {
+      title: "Resolve Link or Ad to Post ID",
+      description:
+        "Resolve a Facebook/Instagram post URL, or a Meta ad_id, to the post_id used by the other cm_* tools. " +
+        "Use this when given a link (e.g. shared by a client) or an ad_id (from Ads Manager) instead of a raw post_id. " +
+        "ad_id resolution requires the ads_read permission and the ad account assigned to the System User — " +
+        "not part of the current setup; if it fails, ask for the post's public link instead.",
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+      inputSchema: {
+        url: z
+          .string()
+          .url()
+          .refine(
+            (u) => /(^|\.)facebook\.com$|(^|\.)instagram\.com$|(^|\.)fb\.watch$/.test(new URL(u).hostname),
+            "Must be a facebook.com, instagram.com or fb.watch URL"
+          )
+          .optional()
+          .describe("Public post/reel permalink from Facebook or Instagram"),
+        ad_id: graphId("ad ID").optional().describe("Meta ad ID from Ads Manager — resolves to the post it promotes"),
+      },
+    },
+    async ({ url, ad_id }) => {
+      try {
+        if (!url && !ad_id) throw new Error("Provide either url or ad_id");
+        if (url && ad_id) throw new Error("Provide only one of url or ad_id, not both");
+
+        if (url) {
+          const res = await resolveUrlToId(url);
+          return textResult(`Resolved to post_id: ${res.id}`);
+        }
+
+        const postId = await resolveAdToPostId(ad_id!);
+        return textResult(`Ad ${ad_id} promotes post_id: ${postId}`);
       } catch (err) {
         return toolError(err);
       }
@@ -188,9 +243,7 @@ export function createCmServer(): McpServer {
         let account: string;
 
         if (platform === "facebook") {
-          if (!post_id.startsWith(`${ctx.pageId}_`)) {
-            throw new Error(`Post ${post_id} does not belong to page ${ctx.pageId}`);
-          }
+          await verifyPageOwnsPost(post_id, ctx.pageToken, ctx.pageId);
           account = `${ctx.pageName} (Facebook)`;
           const res = await graphGet<{
             data: Array<{

@@ -154,15 +154,22 @@ Cliente en `servers/cm/meta.ts`:
 | Tool | Hace | Notas |
 |------|------|-------|
 | `cm_list_accounts` | Páginas asignadas al System User + su Instagram vinculado | Los `page_id` que devuelve son los que usan las demás tools |
-| `cm_list_posts` | Posts recientes de una Página o de su Instagram, con conteo de comentarios | `platform: facebook \| instagram` |
-| `cm_list_comments` | Comentarios de un post, marcando cuáles no tienen respuesta de la cuenta | `only_unanswered` filtra; compara `from.id`/`username` contra la Página/IG |
+| `cm_list_posts` | Posts recientes de una Página o de su Instagram, con conteo de comentarios | `platform: facebook \| instagram`; `include_ads` (solo Facebook) cambia a `promotable_posts` para incluir posts "oscuros" (solo-anuncio, sin entrada orgánica) |
+| `cm_list_comments` | Comentarios de un post, marcando cuáles no tienen respuesta de la cuenta | `only_unanswered` filtra; en Facebook verifica pertenencia con `verifyPageOwnsPost` (fetch real de `from.id`, no asumir el formato del ID) |
+| `cm_resolve_link` | Resuelve una URL pública de Facebook/Instagram, o un `ad_id`, al `post_id` que usan las demás tools | `ad_id` requiere permiso `ads_read` + la cuenta publicitaria asignada al System User — no está en el set de Fase 1; falla con error claro si falta |
 | `cm_reply_comment` | Responde públicamente un comentario | Valida longitud (IG: 300, FB: 8000 caracteres) antes de llamar a Meta |
 | `cm_private_reply` | Responde un comentario por mensaje privado (Messenger/IG Direct) | Solo **una** por comentario; ventana limitada (IG: 7 días); la respuesta del usuario llega al inbox normal (Wati) |
 | `cm_hide_comment` | Oculta/muestra un comentario | Reversible (`hidden: false` para deshacer) |
 
 El **texto de los comentarios es contenido público, no confiable** — las descripciones de las tools lo advierten explícitamente para que el modelo no ejecute instrucciones que aparezcan ahí (prompt injection vía comentarios).
 
-Permisos de Meta usados: `pages_show_list`, `business_management`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_engagement`, `pages_messaging` (para `cm_private_reply`), `instagram_basic`, `instagram_manage_comments`.
+**Verificación de pertenencia (`verifyPageOwnsPost`):** nunca inferir si un post pertenece a la Página comparando el `post_id` como string (p. ej. `startsWith("${pageId}_")`) — Meta no garantiza ese formato; posts "oscuros" (solo-anuncio, vía `promotable_posts`) y versiones nuevas de la API pueden devolver IDs numéricos sin el prefijo. Siempre confirmar con un fetch real del campo `from.id` del post contra la Graph API antes de listar/actuar sobre sus comentarios.
+
+**Posts de anuncios:** `cm_list_posts` con `include_ads: true` usa `{page}/promotable_posts` (incluye posts publicados y "oscuros"/solo-anuncio) en vez de `{page}/posts`. No requiere permiso nuevo. `cm_resolve_link` cubre el otro caso — cuando solo se tiene la URL pública del post o el `ad_id` de Ads Manager, en vez del `post_id` crudo:
+- Con `url`: usa el lookup clásico de Meta `GET /?id=<url>` (Facebook e Instagram). Sin permiso nuevo.
+- Con `ad_id`: resuelve `creative.effective_object_story_id` — cubre posts "oscuros" sin permalink público. **Requiere `ads_read` y que la cuenta publicitaria esté asignada al System User** — permiso fuera del set de Fase 1, pendiente de aprobar en App Review si se usa esta vía.
+
+Permisos de Meta usados (Fase 1): `pages_show_list`, `business_management`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_engagement`, `pages_messaging` (para `cm_private_reply`), `instagram_basic`, `instagram_manage_comments`. `ads_read` **no** está incluido — solo lo necesita la resolución de `ad_id` en `cm_resolve_link`.
 
 ## Gotchas y contexto histórico
 

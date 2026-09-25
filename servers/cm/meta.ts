@@ -142,3 +142,48 @@ export function requireInstagram(ctx: PageContext): { id: string; username?: str
   }
   return ctx.instagram;
 }
+
+/**
+ * Confirm a Facebook post actually belongs to this Page before acting on it.
+ *
+ * Do NOT do this by string-matching the id against "{pageId}_" — Meta does not
+ * guarantee that prefix format (newer API versions, and ad-only/"promotable"
+ * posts in particular, can return a bare numeric post id with no page prefix
+ * at all). Always verify the post's own `from.id` against the Graph API instead.
+ */
+export async function verifyPageOwnsPost(postId: string, pageToken: string, pageId: string): Promise<void> {
+  const post = await graphGet<{ from?: { id: string } }>(assertGraphId(postId, "post_id"), pageToken, {
+    fields: "from",
+  });
+  if (post.from?.id !== pageId) {
+    throw new Error(`Post ${postId} does not belong to page ${pageId} (owner: ${post.from?.id ?? "unknown"})`);
+  }
+}
+
+/**
+ * Resolve a public Facebook/Instagram permalink to its Graph object id, using
+ * Meta's URL-to-object lookup (GET /?id=<url>). Only works for posts with a
+ * public permalink — unpublished ("dark") ad posts don't have one; use
+ * resolveAdToPostId for those.
+ */
+export async function resolveUrlToId(url: string): Promise<{ id: string }> {
+  return graphGet<{ id: string }>("", systemUserToken(), { id: url });
+}
+
+/**
+ * Resolve an ad to the post it promotes (its effective_object_story_id), which
+ * covers unpublished "dark" posts that have no public permalink. Requires the
+ * ads_read permission and the ad account assigned to the System User — NOT
+ * part of the Phase 1 (comments-only) permission set. Fails with a clear error
+ * until that's granted.
+ */
+export async function resolveAdToPostId(adId: string): Promise<string> {
+  const res = await graphGet<{ creative?: { effective_object_story_id?: string } }>(
+    assertGraphId(adId, "ad_id"),
+    systemUserToken(),
+    { fields: "creative{effective_object_story_id}" }
+  );
+  const storyId = res.creative?.effective_object_story_id;
+  if (!storyId) throw new Error(`Ad ${adId} has no resolvable post (effective_object_story_id missing)`);
+  return storyId;
+}
