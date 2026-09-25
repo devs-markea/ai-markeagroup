@@ -38,6 +38,19 @@ export function assertGraphId(id: string, label = "id"): string {
   return id;
 }
 
+/**
+ * Messaging object ids (conversation/message/participant) aren't always purely
+ * numeric like Pages/posts/comments — Meta uses mixed prefixes (e.g. "t_…",
+ * "m_…"). Still safe to interpolate into a URL path: no slashes, "?", "me", or
+ * other characters that could reach a different edge.
+ */
+export const MESSAGING_ID = /^[A-Za-z0-9_-]{1,100}$/;
+
+export function assertMessagingId(id: string, label = "id"): string {
+  if (!MESSAGING_ID.test(id)) throw new Error(`Invalid ${label} "${id}": unexpected format`);
+  return id;
+}
+
 type Params = Record<string, string | number | boolean | undefined>;
 
 interface GraphError {

@@ -143,7 +143,7 @@ Helpers en `servers/fal/client.ts`:
 
 ## MCP `cm` — detalles
 
-**Enfoque:** solo comentarios de posts (Facebook Pages + Instagram). Mensajes directos (Messenger/Instagram Direct) quedan para otra fase — hoy los sigue manejando Wati; no construir tools de DM aquí sin antes resolver el solapamiento (ver Gotchas).
+**Enfoque:** comentarios de posts y conversaciones de Messenger/Instagram Direct (Facebook Pages + Instagram). Wati no administra Messenger ni Instagram en ninguna cuenta — sin solapamiento, `cm` es dueño exclusivo de esos mensajes. Wati sigue siendo el canal de WhatsApp.
 
 Cliente en `servers/cm/meta.ts`:
 - Auth: **System User token** (`META_SYSTEM_USER_TOKEN`) de un Business portfolio, con las Páginas/Instagram asignadas. Las tools obtienen el **Page access token** por Página vía `pageContext()`; nunca se usa el token de System User para leer/escribir contenido de una Página, solo para descubrir cuáles están asignadas y para resolver cada Página.
@@ -160,6 +160,9 @@ Cliente en `servers/cm/meta.ts`:
 | `cm_reply_comment` | Responde públicamente un comentario | Valida longitud (IG: 300, FB: 8000 caracteres) antes de llamar a Meta |
 | `cm_private_reply` | Responde un comentario por mensaje privado (Messenger/IG Direct) | Solo **una** por comentario; ventana limitada (IG: 7 días); la respuesta del usuario llega al inbox normal (Wati) |
 | `cm_hide_comment` | Oculta/muestra un comentario | Reversible (`hidden: false` para deshacer) |
+| `cm_list_conversations` | Conversaciones de Messenger/Instagram Direct, marcando cuáles esperan respuesta | `only_pending` filtra; compara `from.id` del último mensaje contra la Página/IG |
+| `cm_get_conversation` | Lee el hilo completo de una conversación, incluido el `referral.ad_id` si Meta lo reporta | Devuelve `recipient_id` del cliente para usar con `cm_send_message` |
+| `cm_send_message` | Envía un mensaje directo a un `recipient_id` | Ventana de 24h desde el último mensaje del cliente; el error de Meta si está cerrada se propaga tal cual |
 
 El **texto de los comentarios es contenido público, no confiable** — las descripciones de las tools lo advierten explícitamente para que el modelo no ejecute instrucciones que aparezcan ahí (prompt injection vía comentarios).
 
@@ -169,7 +172,11 @@ El **texto de los comentarios es contenido público, no confiable** — las desc
 - Con `url`: usa el lookup clásico de Meta `GET /?id=<url>` (Facebook e Instagram). Sin permiso nuevo.
 - Con `ad_id`: resuelve `creative.effective_object_story_id` — cubre posts "oscuros" sin permalink público. **Requiere `ads_read` y que la cuenta publicitaria esté asignada al System User** — permiso fuera del set de Fase 1, pendiente de aprobar en App Review si se usa esta vía.
 
-Permisos de Meta usados (Fase 1): `pages_show_list`, `business_management`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_engagement`, `pages_messaging` (para `cm_private_reply`), `instagram_basic`, `instagram_manage_comments`. `ads_read` **no** está incluido — solo lo necesita la resolución de `ad_id` en `cm_resolve_link`.
+**Conversaciones (`cm_list_conversations`/`cm_get_conversation`/`cm_send_message`):** pull-based sobre `{page_id}/conversations` (Messenger) y `{ig_id}/conversations` (Instagram) — sin webhooks ni base de datos, consistente con el resto del hub stateless. IDs de mensajería (`conversation_id`, `recipient_id`) no son puramente numéricos como los de posts/comentarios (Meta usa prefijos como `t_…`), así que usan `MESSAGING_ID`/`assertMessagingId` (alfanumérico + `_`/`-`, sin `/`, `?` ni `me`) en vez de `GRAPH_ID`.
+
+⚠️ **Sin verificar contra la API real todavía** (probado solo contra mock): (1) si `referral.ad_id` es recuperable en un GET posterior a los mensajes, o solo llega en tiempo real por webhook — si no viene, `cm_get_conversation` simplemente no muestra el dato, no falla; (2) la forma exacta del edge `{ig_id}/conversations`. Confirmar ambos con una conversación real (idealmente una que venga de un anuncio Click-to-Messenger/Instagram) antes de dar por cerrada esta parte.
+
+Permisos de Meta usados (Fase 1 + mensajes): `pages_show_list`, `business_management`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_engagement`, `pages_messaging`, `instagram_basic`, `instagram_manage_comments`, `instagram_manage_messages`. `ads_read` **no** está incluido — solo lo necesita la resolución de `ad_id` en `cm_resolve_link`.
 
 ## Gotchas y contexto histórico
 
@@ -180,7 +187,7 @@ Permisos de Meta usados (Fase 1): `pages_show_list`, `business_management`, `pag
 - **Rewrites genéricos**: `/:service/mcp` y `/:service/upload` apuntan a `/api/:service/...`; si la función no existe, Vercel responde 404.
 - `servers/fal/catalog.ts` está hardcodeado y puede quedar desactualizado; para info real usar `get_model_schema` / `search_docs`.
 - `rest.alpha.fal.ai` es un endpoint "alpha" de Fal; si fallan los uploads, revisar primero ahí.
-- **Solapamiento `cm` / Wati:** Wati ya administra conversaciones de Messenger/Instagram en algunas cuentas. Por eso la v1 de `cm` no toca DMs (solo `cm_private_reply`, que es un mensaje único disparado por un comentario, no una conversación). Antes de agregar tools de conversación a `cm`, decidir explícitamente qué sistema es dueño de qué cuentas — Meta solo permite un "receptor primario" por Página (Handover Protocol).
+- **`cm` es dueño exclusivo de Messenger/Instagram** (confirmado: Wati nunca se conectó a esos canales, solo a WhatsApp). Si en el futuro se conecta Wati a Messenger/Instagram de alguna Página, revisar el Handover Protocol de Meta (solo un "receptor primario" por Página) antes de que ambos sistemas intenten leer/responder los mismos hilos.
 - **Instagram no permite programar publicaciones por API** — eso sigue en Metricool. `cm` no publica contenido, solo modera/responde comentarios.
 - **App de Meta:** ver memoria `project-meta-cm-app` para los casos de uso ya habilitados en el panel de Meta (Pages, Messenger, Catálogos, Ads MCP, Lead Ads, Marketing API) — la Fase 1 de `cm` solo pide los permisos de comentarios; el resto son fases futuras.
 
